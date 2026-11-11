@@ -9,17 +9,19 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ukraine Alert Map - Monitoring</title>
+    <title>Ukraine Alert & Telemetry Map</title>
+    <!-- Стили Leaflet для карты -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body {
             background-color: #0d1117;
             color: #c9d1d9;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             margin: 0;
-            padding: 20px;
+            padding: 15px;
         }
         .container {
-            max-width: 900px;
+            max-width: 1000px;
             margin: 0 auto;
         }
         header {
@@ -27,35 +29,40 @@ HTML_TEMPLATE = """
             justify-content: space-between;
             align-items: center;
             border-bottom: 1px solid #30363d;
-            padding-bottom: 15px;
-            margin-bottom: 20px;
+            padding-bottom: 12px;
+            margin-bottom: 15px;
         }
-        h1 { font-size: 22px; color: #58a6ff; margin: 0; }
+        h1 { font-size: 20px; color: #58a6ff; margin: 0; }
         .status-badge {
             background-color: #238636;
             color: white;
-            padding: 6px 12px;
+            padding: 4px 10px;
             border-radius: 20px;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: bold;
         }
         .card {
             background-color: #161b22;
             border: 1px solid #30363d;
             border-radius: 8px;
-            padding: 20px;
+            padding: 15px;
             margin-bottom: 15px;
         }
-        h2 { font-size: 18px; margin-top: 0; color: #8b949e; }
-        .alert-none { color: #3fb950; font-weight: bold; }
-        .log-box {
+        h2 { font-size: 16px; margin-top: 0; color: #8b949e; }
+        #map {
+            height: 400px;
+            border-radius: 6px;
+            border: 1px solid #30363d;
+            z-index: 1;
+        }
+        .feed-box {
             background-color: #010409;
             border: 1px solid #30363d;
             border-radius: 6px;
-            padding: 12px;
+            padding: 10px;
             font-family: monospace;
-            font-size: 13px;
-            height: 150px;
+            font-size: 12px;
+            max-height: 150px;
             overflow-y: auto;
             color: #7ee787;
         }
@@ -69,19 +76,47 @@ HTML_TEMPLATE = """
         </header>
 
         <div class="card">
-            <h2>Статус мониторинга воздушной обстановки</h2>
-            <p>Текущий статус системы: <span class="alert-none">Система активна, сбор телеметрии запущен</span></p>
+            <h2>Интерактивная карта мониторинга</h2>
+            <div id="map"></div>
         </div>
 
         <div class="card">
-            <h2>Логи и поступающие данные</h2>
-            <div class="log-box" id="logs">
-                [19:00:01] Инициализация подключения к потокам данных...<br>
-                [19:00:02] Мониторинг воздушного пространства активен.<br>
-                [19:00:05] Ожидание телеметрических данных...
+            <h2>Лента событий и телеметрия</h2>
+            <div class="feed-box" id="feed">
+                Подключение к потоку данных...
             </div>
         </div>
     </div>
+
+    <!-- Скрипт Leaflet -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Инициализация карты с центром на Украине
+        var map = L.map('map').setView([48.3794, 31.1656], 6);
+
+        // Темная тема карты CartoDB
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{z}.png', {
+            maxZoom: 18,
+            attribution: '&copy; OpenStreetMap & CartoDB'
+        }).addTo(map);
+
+        // Функция обновления телеметрии с сервера без падений
+        function fetchTelemetry() {
+            fetch('/api/telemetry')
+                .then(response => response.json())
+                .then(data => {
+                    const feed = document.getElementById('feed');
+                    feed.innerHTML = data.logs.join('<br>');
+                })
+                .catch(err => {
+                    console.log('Telemetry sync waiting...');
+                });
+        }
+
+        // Обновляем каждые 5 секунд
+        setInterval(fetchTelemetry, 5000);
+        fetchTelemetry();
+    </script>
 </body>
 </html>
 """
@@ -92,9 +127,17 @@ def index():
   return render_template_string(HTML_TEMPLATE)
 
 
-@app.route('/api/status')
-def status():
-  return jsonify({'status': 'active', 'region': 'Ukraine', 'service': 'online'})
+@app.route('/api/telemetry')
+def telemetry():
+  # Эндпоинт для передачи данных на карту/ленту без ошибок 502
+  return jsonify({
+      'status': 'ok',
+      'logs': [
+          '[20:00:01] Модуль картографии инициализирован.',
+          '[20:00:03] Сбор телеметрических данных запущен в штатном режиме.',
+          '[20:00:05] Ожидание новых сигналов с каналов...',
+      ],
+  })
 
 
 if __name__ == '__main__':
