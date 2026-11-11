@@ -7,7 +7,6 @@ from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
 
-# Стартовые логи до загрузки из Telegram
 latest_logs = [
     "[SYSTEM] Инициализация модулей...",
     "[SYSTEM] Подключение к каналам мониторинга...",
@@ -45,7 +44,6 @@ def fetch_telegram_posts():
             
         time.sleep(20)
 
-# Запускаем фоновый поток
 threading.Thread(target=fetch_telegram_posts, daemon=True).start()
 
 HTML_TEMPLATE = """
@@ -135,10 +133,21 @@ HTML_TEMPLATE = """
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        var map = L.map('map').setView([48.3794, 31.1656], 6);
+        // Границы Украины для ограничения карты
+        var ukraineBounds = [
+            [44.0, 21.5], // Юго-Запад
+            [53.0, 40.5]  // Северо-Восток
+        ];
+
+        // Инициализация карты с жесткой привязкой к границам Украины
+        var map = L.map('map', {
+            maxBounds: ukraineBounds,
+            maxBoundsViscosity: 1.0, // Запрещает вытягивать карту за пределы границ
+            minZoom: 6,
+            maxZoom: 12
+        }).setView([48.3794, 31.1656], 6);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 18,
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
