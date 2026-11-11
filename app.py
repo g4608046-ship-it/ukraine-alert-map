@@ -1,72 +1,94 @@
 import os
 import time
+import asyncio
 import threading
-import requests
-from bs4 import BeautifulSoup
 from flask import Flask, jsonify, render_template_string
+from telethon import TelegramClient
 
 app = Flask(__name__)
 
-# Изначально лента пуста, пока не придут реальные данные
-latest_logs = [
-    {"channel": "Система", "time": "03:40", "text": "Инициализация мониторинга каналов..."},
-]
+# Твои учетные данные Telegram API
+API_ID = 1234567  # Замени на свой integer API_ID
+API_HASH = 'your_api_hash_here'  # Замени на свой string API_HASH
+PHONE_NUMBER = '+380XXXXXXXXX'   # Твой номер телефона
 
+# Каналы для мониторинга
 CHANNELS = ["raketa_trevoga", "timofii_kucher", "kiev_nebo"]
 
-def fetch_telegram_posts():
-    global latest_logs
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    }
-    
-    while True:
-        all_messages = []
-        for channel in CHANNELS:
-            url = f"https://t.me/s/{channel}"
-            try:
-                response = requests.get(url, headers=headers, timeout=10)
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    messages = soup.find_all('div', class_='tgme_widget_message')
-                    
-                    for msg in messages[-3:]:
-                        text_elem = msg.find('div', class_='tgme_widget_message_text')
-                        time_elem = msg.find('time', class_='tgme_widget_message_date')
-                        
-                        text = text_elem.get_text(strip=True) if text_elem else ""
-                        post_time = "LIVE"
-                        if time_elem and time_elem.has_attr('datetime'):
-                            dt_str = time_elem['datetime']
-                            if 'T' in dt_str:
-                                post_time = dt_str.split('T')[1][:5]
-                                
-                        if text:
-                            if len(text) > 130:
-                                text = text[:127] + "..."
-                            all_messages.append({
-                                "channel": f"@{channel}",
-                                "time": post_time,
-                                "text": text
-                            })
-            except Exception as e:
-                print(f"Ошибка парсинга {channel}: {e}")
-        
-        # Если реально удалось что-то спарсить с каналов — заменяем полностью список
-        if all_messages:
-            unique_logs = []
-            seen = set()
-            for msg in reversed(all_messages):
-                identifier = (msg["channel"], msg["text"])
-                if identifier not in seen:
-                    seen.add(identifier)
-                    unique_logs.append(msg)
-            
-            latest_logs = unique_logs[:10]
-            
-        time.sleep(20)
+latest_logs = [
+    {"channel": "Система", "time": "LIVE", "text": "Инициализация Telethon клиента..."},
+]
 
-threading.Thread(target=fetch_telegram_posts, daemon=True).start()
+def run_telegram_client():
+    global latest_logs
+    
+    # Создаем асинхронный цикл для Telethon в фоновом потоке
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    client = TelegramClient('session_name', API_ID, API_HASH)
+
+    async def main():
+        global latest_logs
+        try:
+            await client.start(phone=PHONE_NUMBER)
+            print("Telethon клиент успешно запущен как читатель!")
+            
+            while True:
+                all_messages = []
+                for channel in CHANNELS:
+                    try:
+                        entity = await client.get_entity(channel)
+                        # Читаем последние 3 сообщения из каждого канала
+                        async for message in client.iter_messages(entity, limit=3):
+                            if message.text:
+                                msg_text = message.text
+                                if len(msg_text) > 130:
+                                    msg_text = msg_text[:127] + "..."
+                                    
+                                # Форматируем время сообщения
+                                msg_time = "LIVE"
+                                if message.date:
+                                    # Конвертируем в локальное время (UTC+2/+3) или просто берем часы:минуты
+                                    local_time = message.date.strftime('%H:%M')
+                                    msg_time = local_time
+
+                                all_messages.append({
+                                    "channel": f"@{channel}",
+                                    "time": msg_time,
+                                    "text": msg_text
+                                })
+                    except Exception as e:
+                        print(f"Ошибка чтения канала {channel}: {e}")
+
+                if all_messages:
+                    # Сортируем и убираем дубликаты, свежие сверху
+                    unique_logs = []
+                    seen = set()
+                    for msg in all_messages:
+                        identifier = (msg["channel"], msg["text"])
+                        if identifier not in seen:
+                            seen.add(identifier)
+                            unique_logs.append(msg)
+                    
+                    # Ограничиваем до 10 последних штук
+                    latest_logs = unique_logs[:10]
+
+                # Пауза перед следующим опросом каналов через API
+                await asyncio.sleep(20)
+                
+        except Exception as e:
+            print(f"Ошибка авторизации/работы Telethon: {e}")
+            latest_logs = [{
+                "channel": "Ошибка",
+                "time": "ERR",
+                "text": f"Сбой Telethon: {str(e)}"
+            }]
+
+    loop.run_until_complete(main())
+
+# Запускаем Telethon в фоновом потоке, чтобы он не вешал Flask
+threading.Thread(target=run_telegram_client, daemon=True).start()
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -189,7 +211,7 @@ HTML_TEMPLATE = """
 
         <div class="feed-header">Повідомлення з Telegram</div>
         <div id="feed-container">
-            Синхронизация ленты...
+            Загрузка данных через Telethon API...
         </div>
     </div>
 
