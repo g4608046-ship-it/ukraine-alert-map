@@ -1,7 +1,56 @@
 import os
+import time
+import threading
+import requests
+from bs4 import BeautifulSoup
 from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
+
+# Глобальный список для хранения последних логов со всех каналов
+latest_logs = [
+    "[20:00:01] Система мониторинга запущена.",
+    "[20:00:03] Подключение к источникам Telegram...",
+]
+
+# Список каналов для мониторинга
+CHANNELS = ["raketa_trevoga", "timofii_kucher", "kiev_nebo"]
+
+def fetch_telegram_posts():
+    global latest_logs
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+    
+    while True:
+        all_messages = []
+        for channel in CHANNELS:
+            url = f"https://t.me/s/{channel}"
+            try:
+                response = requests.get(url, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    messages = soup.find_all('div', class_='tgme_widget_message_text')
+                    
+                    # Берем последние 3 сообщения из каждого канала
+                    for msg in messages[-3:]:
+                        text = msg.get_text(strip=True)
+                        if text:
+                            if len(text) > 100:
+                                text = text[:97] + "..."
+                            all_messages.append(f"<b>[{channel}]</b> {text}")
+            except Exception as e:
+                print(f"Ошибка при парсинге {channel}: {e}")
+        
+        if all_messages:
+            # Общий список обновляем свежими данными
+            latest_logs = all_messages[-10:]  # Последние 10 сообщений со всех каналов
+            
+        # Обновляем каждые 20 секунд
+        time.sleep(20)
+
+# Запускаем фоновый сборщик в отдельном потоке
+threading.Thread(target=fetch_telegram_posts, daemon=True).start()
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -10,7 +59,6 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ukraine Alert & Telemetry Map</title>
-    <!-- Стили Leaflet для карты -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body {
@@ -62,9 +110,10 @@ HTML_TEMPLATE = """
             padding: 10px;
             font-family: monospace;
             font-size: 12px;
-            max-height: 150px;
+            max-height: 200px;
             overflow-y: auto;
             color: #7ee787;
+            line-height: 1.4;
         }
     </style>
 </head>
@@ -81,40 +130,35 @@ HTML_TEMPLATE = """
         </div>
 
         <div class="card">
-            <h2>Лента событий и телеметрия</h2>
+            <h2>Лента событий (Telegram-мониторинг)</h2>
             <div class="feed-box" id="feed">
-                Подключение к потоку данных...
+                Загрузка данных из каналов...
             </div>
         </div>
     </div>
 
-    <!-- Скрипт Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Инициализация карты с центром на Украине
         var map = L.map('map').setView([48.3794, 31.1656], 6);
 
-        // Стабильный слой OpenStreetMap для надежного отображения тайлов
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 18,
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
-        // Функция обновления телеметрии с сервера без падений
         function fetchTelemetry() {
             fetch('/api/telemetry')
                 .then(response => response.json())
                 .then(data => {
                     const feed = document.getElementById('feed');
-                    feed.innerHTML = data.logs.join('<br>');
+                    feed.innerHTML = data.logs.join('<br><br>');
                 })
                 .catch(err => {
-                    console.log('Telemetry sync waiting...');
+                    console.log('Sync waiting...');
                 });
         }
 
-        // Обновляем каждые 5 секунд
-        setInterval(fetchTelemetry, 5000);
+        setInterval(fetchTelemetry, 10000);
         fetchTelemetry();
     </script>
 </body>
@@ -123,22 +167,3 @@ HTML_TEMPLATE = """
 
 
 @app.route('/')
-def index():
-  return render_template_string(HTML_TEMPLATE)
-
-
-@app.route('/api/telemetry')
-def telemetry():
-  return jsonify({
-      'status': 'ok',
-      'logs': [
-          '[20:00:01] Модуль картографии инициализирован.',
-          '[20:00:03] Сбор телеметрических данных запущен в штатном режиме.',
-          '[20:00:05] Ожидание новых сигналов с каналов...',
-      ],
-  })
-
-
-if __name__ == '__main__':
-  port = int(os.environ.get('PORT', 5000))
-  app.run(host='0.0.0.0', port=port)
