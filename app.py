@@ -176,7 +176,7 @@ HTML_TEMPLATE = """
             </div>
         </header>
 
-        <!-- Карта в темном минималистичном стиле с городами и районами -->
+        <!-- Карта -->
         <div class="map-card">
             <div id="map"></div>
         </div>
@@ -190,7 +190,6 @@ HTML_TEMPLATE = """
     <!-- Скрипт Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Установка актуальной даты как на скриншоте
         const now = new Date();
         const day = String(now.getDate()).padStart(2, '0');
         const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -199,7 +198,6 @@ HTML_TEMPLATE = """
         const minutes = String(now.getMinutes()).padStart(2, '0');
         document.getElementById('live-date').innerText = `Станом на ${day}.${month}.${year} ${hours}:${minutes}`;
 
-        // Границы Украины
         var ukraineBounds = [
             [44.3, 21.8],
             [52.4, 40.2]
@@ -212,11 +210,10 @@ HTML_TEMPLATE = """
             maxZoom: 10
         }).setView([48.3794, 31.1656], 6);
 
-        // Используем темные тайлы CartoDB Dark Matter (идеально под стиль карты тревог с подписями городов и районов)
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 19,
-            subdomains: 'abcd',
-            attribution: '&copy; <a href="https://carto.com/">CARTO</a>'
+        // Используем бесплатные и надежные темные тайлы OpenStreetMap (Alidade Smooth Dark) без требования ключей
+        L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png', {
+            maxZoom: 20,
+            attribution: '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a>, &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="http://openstreetmap.org">OpenStreetMap</a>'
         }).addTo(map);
 
         function fetchTelemetry() {
