@@ -3,15 +3,13 @@ import time
 import threading
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
 
-# Секретный пароль для доступа к добавлению (можешь изменить на любой свой)
-ADMIN_SECRET_KEY = "my_super_secret_pass_123"
-
+# Изначально лента пуста, пока не придут реальные данные
 latest_logs = [
-    {"channel": "Система", "time": "03:30", "text": "Защищенный мониторинг запущен..."},
+    {"channel": "Система", "time": "03:40", "text": "Инициализация мониторинга каналов..."},
 ]
 
 CHANNELS = ["raketa_trevoga", "timofii_kucher", "kiev_nebo"]
@@ -27,7 +25,7 @@ def fetch_telegram_posts():
         for channel in CHANNELS:
             url = f"https://t.me/s/{channel}"
             try:
-                response = requests.get(url, headers=headers, timeout=8)
+                response = requests.get(url, headers=headers, timeout=10)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     messages = soup.find_all('div', class_='tgme_widget_message')
@@ -52,8 +50,9 @@ def fetch_telegram_posts():
                                 "text": text
                             })
             except Exception as e:
-                print(f"Ошибка фонового опроса {channel}: {e}")
+                print(f"Ошибка парсинга {channel}: {e}")
         
+        # Если реально удалось что-то спарсить с каналов — заменяем полностью список
         if all_messages:
             unique_logs = []
             seen = set()
@@ -137,4 +136,129 @@ HTML_TEMPLATE = """
             color: #8b949e;
             text-align: center;
             margin-bottom: 10px;
-            text-transform:
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .post-card {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 12px 15px;
+            margin-bottom: 10px;
+        }
+        .post-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .channel-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #58a6ff;
+            font-weight: 500;
+        }
+        .post-time {
+            color: #8b949e;
+            font-size: 12px;
+        }
+        .post-text {
+            font-size: 14px;
+            color: #e6edf3;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-title">
+                <div class="app-icon">🇺🇦</div>
+                <div>
+                    <h1>Мапа тривог</h1>
+                    <div class="sub-date" id="live-date">Станом на --.--.---- --:--</div>
+                </div>
+            </div>
+        </header>
+
+        <div class="map-card">
+            <div id="map"></div>
+        </div>
+
+        <div class="feed-header">Повідомлення з Telegram</div>
+        <div id="feed-container">
+            Синхронизация ленты...
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const now = new Date();
+        const day = String(now.getDate()).padStart(2, '0');
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = now.getFullYear();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        document.getElementById('live-date').innerText = `Станом на ${day}.${month}.${year} ${hours}:${minutes}`;
+
+        var ukraineBounds = [
+            [44.3, 21.8],
+            [52.4, 40.2]
+        ];
+
+        var map = L.map('map', {
+            maxBounds: ukraineBounds,
+            maxBoundsViscosity: 1.0,
+            minZoom: 6,
+            maxZoom: 10
+        }).setView([48.3794, 31.1656], 6);
+
+        L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png', {
+            maxZoom: 20,
+            attribution: '&copy; Stadia Maps, OpenMapTiles, OpenStreetMap'
+        }).addTo(map);
+
+        function fetchTelemetry() {
+            fetch('/api/telemetry')
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('feed-container');
+                    let html = '';
+                    data.logs.forEach(post => {
+                        html += `
+                            <div class="post-card">
+                                <div class="post-header">
+                                    <div class="channel-info">
+                                        <span>🔵</span> ${post.channel}
+                                    </div>
+                                    <div class="post-time">${post.time}</div>
+                                </div>
+                                <div class="post-text">${post.text}</div>
+                            </div>
+                        `;
+                    });
+                    container.innerHTML = html;
+                })
+                .catch(err => console.log('Sync error'));
+        }
+
+        setInterval(fetchTelemetry, 5000);
+        fetchTelemetry();
+    </script>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/api/telemetry')
+def telemetry():
+    return jsonify({'status': 'ok', 'logs': latest_logs})
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
