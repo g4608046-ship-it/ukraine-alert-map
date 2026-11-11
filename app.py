@@ -7,13 +7,12 @@ from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
 
-# Глобальный список для хранения последних логов со всех каналов
+# Стартовые логи до загрузки из Telegram
 latest_logs = [
-    "[20:00:01] Система мониторинга запущена.",
-    "[20:00:03] Подключение к источникам Telegram...",
+    "[SYSTEM] Инициализация модулей...",
+    "[SYSTEM] Подключение к каналам мониторинга...",
 ]
 
-# Список каналов для мониторинга
 CHANNELS = ["raketa_trevoga", "timofii_kucher", "kiev_nebo"]
 
 def fetch_telegram_posts():
@@ -32,7 +31,6 @@ def fetch_telegram_posts():
                     soup = BeautifulSoup(response.text, 'html.parser')
                     messages = soup.find_all('div', class_='tgme_widget_message_text')
                     
-                    # Берем последние 3 сообщения из каждого канала
                     for msg in messages[-3:]:
                         text = msg.get_text(strip=True)
                         if text:
@@ -43,13 +41,11 @@ def fetch_telegram_posts():
                 print(f"Ошибка при парсинге {channel}: {e}")
         
         if all_messages:
-            # Общий список обновляем свежими данными
-            latest_logs = all_messages[-10:]  # Последние 10 сообщений со всех каналов
+            latest_logs = all_messages[-10:]
             
-        # Обновляем каждые 20 секунд
         time.sleep(20)
 
-# Запускаем фоновый сборщик в отдельном потоке
+# Запускаем фоновый поток
 threading.Thread(target=fetch_telegram_posts, daemon=True).start()
 
 HTML_TEMPLATE = """
@@ -132,7 +128,7 @@ HTML_TEMPLATE = """
         <div class="card">
             <h2>Лента событий (Telegram-мониторинг)</h2>
             <div class="feed-box" id="feed">
-                Загрузка данных из каналов...
+                Подключение к потоку данных...
             </div>
         </div>
     </div>
@@ -158,12 +154,21 @@ HTML_TEMPLATE = """
                 });
         }
 
-        setInterval(fetchTelemetry, 10000);
+        setInterval(fetchTelemetry, 5000);
         fetchTelemetry();
     </script>
 </body>
 </html>
 """
 
-
 @app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/api/telemetry')
+def telemetry():
+    return jsonify({'status': 'ok', 'logs': latest_logs})
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
