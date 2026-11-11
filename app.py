@@ -8,8 +8,7 @@ from flask import Flask, jsonify, render_template_string
 app = Flask(__name__)
 
 latest_logs = [
-    "[SYSTEM] Инициализация модулей...",
-    "[SYSTEM] Подключение к каналам мониторинга...",
+    {"channel": "Система мониторинга", "time": "00:00", "text": "Инициализация модулей и подключение к Telegram..."},
 ]
 
 CHANNELS = ["raketa_trevoga", "timofii_kucher", "kiev_nebo"]
@@ -28,19 +27,32 @@ def fetch_telegram_posts():
                 response = requests.get(url, headers=headers, timeout=10)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
-                    messages = soup.find_all('div', class_='tgme_widget_message_text')
+                    messages = soup.find_all('div', class_='tgme_widget_message')
                     
                     for msg in messages[-3:]:
-                        text = msg.get_text(strip=True)
+                        text_elem = msg.find('div', class_='tgme_widget_message_text')
+                        time_elem = msg.find('time', class_='tgme_widget_message_date')
+                        
+                        text = text_elem.get_text(strip=True) if text_elem else ""
+                        post_time = "00:00"
+                        if time_elem and time_elem.has_attr('datetime'):
+                            dt_str = time_elem['datetime']
+                            if 'T' in dt_str:
+                                post_time = dt_str.split('T')[1][:5]
+                                
                         if text:
-                            if len(text) > 100:
-                                text = text[:97] + "..."
-                            all_messages.append(f"<b>[{channel}]</b> {text}")
+                            if len(text) > 130:
+                                text = text[:127] + "..."
+                            all_messages.append({
+                                "channel": f"@{channel}",
+                                "time": post_time,
+                                "text": text
+                            })
             except Exception as e:
                 print(f"Ошибка при парсинге {channel}: {e}")
         
         if all_messages:
-            latest_logs = all_messages[-10:]
+            latest_logs = all_messages[-10:][::-1]
             
         time.sleep(20)
 
@@ -52,7 +64,8 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ukraine Alert & Telemetry Map</title>
+    <title>Мапа тривог</title>
+    <!-- Стили Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body {
@@ -60,53 +73,93 @@ HTML_TEMPLATE = """
             color: #c9d1d9;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             margin: 0;
-            padding: 15px;
+            padding: 10px;
         }
         .container {
-            max-width: 1000px;
+            max-width: 600px;
             margin: 0 auto;
         }
         header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #30363d;
-            padding-bottom: 12px;
-            margin-bottom: 15px;
+            padding: 10px 5px;
+            margin-bottom: 5px;
         }
-        h1 { font-size: 20px; color: #58a6ff; margin: 0; }
-        .status-badge {
-            background-color: #238636;
-            color: white;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 13px;
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .app-icon {
+            width: 32px;
+            height: 32px;
+            background: #ffcc00;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             font-weight: bold;
+            color: #000;
+            font-size: 16px;
         }
-        .card {
+        h1 { font-size: 18px; margin: 0; color: #fff; }
+        .sub-date { font-size: 11px; color: #8b949e; }
+        
+        /* Карточка карты в стиле приложения */
+        .map-card {
             background-color: #161b22;
             border: 1px solid #30363d;
-            border-radius: 8px;
-            padding: 15px;
+            border-radius: 12px;
+            padding: 8px;
             margin-bottom: 15px;
         }
-        h2 { font-size: 16px; margin-top: 0; color: #8b949e; }
         #map {
-            height: 400px;
-            border-radius: 6px;
+            height: 360px;
+            border-radius: 8px;
             border: 1px solid #30363d;
+            background-color: #161b22;
             z-index: 1;
         }
-        .feed-box {
-            background-color: #010409;
-            border: 1px solid #30363d;
-            border-radius: 6px;
-            padding: 10px;
-            font-family: monospace;
+
+        /* Лента сообщений Telegram */
+        .feed-header {
             font-size: 12px;
-            max-height: 200px;
-            overflow-y: auto;
-            color: #7ee787;
+            font-weight: bold;
+            color: #8b949e;
+            text-align: center;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .post-card {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 12px 15px;
+            margin-bottom: 10px;
+        }
+        .post-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .channel-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #58a6ff;
+            font-weight: 500;
+        }
+        .post-time {
+            color: #8b949e;
+            font-size: 12px;
+        }
+        .post-text {
+            font-size: 14px;
+            color: #e6edf3;
             line-height: 1.4;
         }
     </style>
@@ -114,53 +167,80 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <header>
-            <h1>🇺🇦 Ukraine Alert & Telemetry Map</h1>
-            <div class="status-badge">LIVE 24/7</div>
+            <div class="header-title">
+                <div class="app-icon">🇺🇦</div>
+                <div>
+                    <h1>Мапа тривог</h1>
+                    <div class="sub-date" id="live-date">Станом на --.--.---- --:--</div>
+                </div>
+            </div>
         </header>
 
-        <div class="card">
-            <h2>Интерактивная карта мониторинга</h2>
+        <!-- Карта в темном минималистичном стиле с городами и районами -->
+        <div class="map-card">
             <div id="map"></div>
         </div>
 
-        <div class="card">
-            <h2>Лента событий (Telegram-мониторинг)</h2>
-            <div class="feed-box" id="feed">
-                Подключение к потоку данных...
-            </div>
+        <div class="feed-header">Повідомлення з Telegram</div>
+        <div id="feed-container">
+            Загрузка ленты...
         </div>
     </div>
 
+    <!-- Скрипт Leaflet -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        // Границы Украины для ограничения карты
+        // Установка актуальной даты как на скриншоте
+        const now = new Date();
+        const day = String(now.getDate()).padStart(2, '0');
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const year = now.getFullYear();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        document.getElementById('live-date').innerText = `Станом на ${day}.${month}.${year} ${hours}:${minutes}`;
+
+        // Границы Украины
         var ukraineBounds = [
-            [44.0, 21.5], // Юго-Запад
-            [53.0, 40.5]  // Северо-Восток
+            [44.3, 21.8],
+            [52.4, 40.2]
         ];
 
-        // Инициализация карты с жесткой привязкой к границам Украины
         var map = L.map('map', {
             maxBounds: ukraineBounds,
-            maxBoundsViscosity: 1.0, // Запрещает вытягивать карту за пределы границ
+            maxBoundsViscosity: 1.0,
             minZoom: 6,
-            maxZoom: 12
+            maxZoom: 10
         }).setView([48.3794, 31.1656], 6);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap contributors'
+        // Используем темные тайлы CartoDB Dark Matter (идеально под стиль карты тревог с подписями городов и районов)
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            subdomains: 'abcd',
+            attribution: '&copy; <a href="https://carto.com/">CARTO</a>'
         }).addTo(map);
 
         function fetchTelemetry() {
             fetch('/api/telemetry')
                 .then(response => response.json())
                 .then(data => {
-                    const feed = document.getElementById('feed');
-                    feed.innerHTML = data.logs.join('<br><br>');
+                    const container = document.getElementById('feed-container');
+                    let html = '';
+                    data.logs.forEach(post => {
+                        html += `
+                            <div class="post-card">
+                                <div class="post-header">
+                                    <div class="channel-info">
+                                        <span>🔵</span> ${post.channel}
+                                    </div>
+                                    <div class="post-time">${post.time}</div>
+                                </div>
+                                <div class="post-text">${post.text}</div>
+                            </div>
+                        `;
+                    });
+                    container.innerHTML = html;
                 })
-                .catch(err => {
-                    console.log('Sync waiting...');
-                });
+                .catch(err => console.log('Sync error'));
         }
 
         setInterval(fetchTelemetry, 5000);
