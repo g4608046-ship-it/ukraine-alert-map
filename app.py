@@ -2,49 +2,39 @@ import os
 import time
 import threading
 import requests
-from bs4 import BeautifulSoup
 from flask import Flask, jsonify, render_template_string
 
 app = Flask(__name__)
 
-# Стартовый лог
 latest_logs = [
-    {"channel": "Система", "time": "00:00", "text": "Запрос к публичным каналам Telegram..."},
+    {"channel": "Система", "time": "00:00", "text": "Подключение к агрегатору ленты..."},
 ]
 
 CHANNELS = ["raketa_trevoga", "timofii_kucher", "kiev_nebo"]
 
 def fetch_telegram_posts():
     global latest_logs
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7"
-    }
-    
     while True:
         all_messages = []
         for channel in CHANNELS:
-            url = f"https://t.me/s/{channel}"
+            # Используем публичный RSS-мост для Telegram, который не блокируется
+            rss_url = f"https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Ft.me%2Fs%2F{channel}"
             try:
-                response = requests.get(url, headers=headers, timeout=12)
+                response = requests.get(rss_url, timeout=10)
                 if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    # Ищем все блоки сообщений
-                    messages = soup.find_all('div', class_='tgme_widget_message')
-                    
-                    if messages:
-                        for msg in messages[-3:]:
-                            text_elem = msg.find('div', class_='tgme_widget_message_text')
-                            time_elem = msg.find('time', class_='tgme_widget_message_date')
+                    data = response.json()
+                    if data.get("status") == "ok" and "items" in data:
+                        for item in data["items"][:3]:
+                            title = item.get("title", "")
+                            pub_date = item.get("pubDate", "")
                             
-                            text = text_elem.get_text(strip=True) if text_elem else ""
+                            # Извлекаем часы и минуты из даты
                             post_time = "LIVE"
-                            if time_elem and time_elem.has_attr('datetime'):
-                                dt_str = time_elem['datetime']
-                                if 'T' in dt_str:
-                                    post_time = dt_str.split('T')[1][:5]
-                                    
+                            if " " in pub_date:
+                                post_time = pub_date.split(" ")[1][:5]
+                                
+                            # Очищаем от лишних тегов если есть
+                            text = title.replace("<br>", " ").replace("<b>", "").replace("</b>", "")
                             if text:
                                 if len(text) > 130:
                                     text = text[:127] + "..."
@@ -53,38 +43,21 @@ def fetch_telegram_posts():
                                     "time": post_time,
                                     "text": text
                                 })
-                    else:
-                        # Запасной вариант поиска текста, если структура класса изменилась
-                        texts = soup.find_all('div', class_='tgme_widget_message_text')
-                        for t in texts[-3:]:
-                            content = t.get_text(strip=True)
-                            if content:
-                                all_messages.append({
-                                    "channel": f"@{channel}",
-                                    "time": "LIVE",
-                                    "text": content[:127] + "..." if len(content) > 130 else content
-                                })
-                else:
-                    all_messages.append({
-                        "channel": f"@{channel}",
-                        "time": "ERR",
-                        "text": f"Ошибка доступа (HTTP {response.status_code}). Telegram ограничил запрос."
-                    })
             except Exception as e:
-                print(f"Ошибка парсинга {channel}: {e}")
-                all_messages.append({
-                    "channel": f"@{channel}",
-                    "time": "ERR",
-                    "text": "Таймаут соединения с источником."
-                })
+                print(f"Ошибка агрегатора для {channel}: {e}")
         
         if all_messages:
-            # Свежие сверху (ограничим до 10 последних)
+            # Свежие сверху
             latest_logs = all_messages[-10:][::-1]
+        else:
+            latest_logs = [{
+                "channel": "Менеджер",
+                "time": "INFO",
+                "text": "Ожидание потока данных телеметрии..."
+            }]
             
-        time.sleep(20)
+        time.sleep(30)
 
-# Запуск фонового потока
 threading.Thread(target=fetch_telegram_posts, daemon=True).start()
 
 HTML_TEMPLATE = """
