@@ -1,64 +1,13 @@
 import os
 import time
-import threading
-import requests
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 
 app = Flask(__name__)
 
+# Хранилище логов в памяти (последние 10 сообщений)
 latest_logs = [
-    {"channel": "Система", "time": "00:00", "text": "Подключение к агрегатору ленты..."},
+    {"channel": "Система", "time": "03:20", "text": "Мониторинг запущен. Ожидание данных..."},
 ]
-
-CHANNELS = ["raketa_trevoga", "timofii_kucher", "kiev_nebo"]
-
-def fetch_telegram_posts():
-    global latest_logs
-    while True:
-        all_messages = []
-        for channel in CHANNELS:
-            # Используем публичный RSS-мост для Telegram, который не блокируется
-            rss_url = f"https://api.rss2json.com/v1/api.json?rss_url=https%3A%2F%2Ft.me%2Fs%2F{channel}"
-            try:
-                response = requests.get(rss_url, timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("status") == "ok" and "items" in data:
-                        for item in data["items"][:3]:
-                            title = item.get("title", "")
-                            pub_date = item.get("pubDate", "")
-                            
-                            # Извлекаем часы и минуты из даты
-                            post_time = "LIVE"
-                            if " " in pub_date:
-                                post_time = pub_date.split(" ")[1][:5]
-                                
-                            # Очищаем от лишних тегов если есть
-                            text = title.replace("<br>", " ").replace("<b>", "").replace("</b>", "")
-                            if text:
-                                if len(text) > 130:
-                                    text = text[:127] + "..."
-                                all_messages.append({
-                                    "channel": f"@{channel}",
-                                    "time": post_time,
-                                    "text": text
-                                })
-            except Exception as e:
-                print(f"Ошибка агрегатора для {channel}: {e}")
-        
-        if all_messages:
-            # Свежие сверху
-            latest_logs = all_messages[-10:][::-1]
-        else:
-            latest_logs = [{
-                "channel": "Менеджер",
-                "time": "INFO",
-                "text": "Ожидание потока данных телеметрии..."
-            }]
-            
-        time.sleep(30)
-
-threading.Thread(target=fetch_telegram_posts, daemon=True).start()
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -115,7 +64,7 @@ HTML_TEMPLATE = """
             margin-bottom: 15px;
         }
         #map {
-            height: 360px;
+            height: 340px;
             border-radius: 8px;
             border: 1px solid #30363d;
             background-color: #161b22;
@@ -161,6 +110,36 @@ HTML_TEMPLATE = """
             color: #e6edf3;
             line-height: 1.4;
         }
+
+        /* Форма добавления (скрытая/аккуратная панель) */
+        .admin-panel {
+            background-color: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 15px;
+        }
+        .admin-panel input, .admin-panel textarea {
+            width: 100%;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #fff;
+            padding: 8px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            box-sizing: border-box;
+            font-size: 13px;
+        }
+        .admin-panel button {
+            background: #238636;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            width: 100%;
+        }
     </style>
 </head>
 <body>
@@ -175,8 +154,18 @@ HTML_TEMPLATE = """
             </div>
         </header>
 
+        <!-- Карта -->
         <div class="map-card">
             <div id="map"></div>
+        </div>
+
+        <!-- Быстрая панель добавления поста (работает прямо с телефона) -->
+        <div class="admin-panel">
+            <form id="post-form" onsubmit="addPost(event)">
+                <input type="text" id="channel-input" placeholder="Канал (например: @raketa_trevoga)" value="@raketa_trevoga" required>
+                <textarea id="text-input" rows="2" placeholder="Текст сообщения о тревоге..." required></textarea>
+                <button type="submit">Опубликовать в ленту</button>
+            </form>
         </div>
 
         <div class="feed-header">Повідомлення з Telegram</div>
@@ -236,6 +225,25 @@ HTML_TEMPLATE = """
                 .catch(err => console.log('Sync error'));
         }
 
+        function addPost(event) {
+            event.preventDefault();
+            const channel = document.getElementById('channel-input').value;
+            const text = document.getElementById('text-input').value;
+
+            fetch('/api/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ channel, text })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.status === 'ok') {
+                    document.getElementById('text-input').value = '';
+                    fetchTelemetry();
+                }
+            });
+        }
+
         setInterval(fetchTelemetry, 5000);
         fetchTelemetry();
     </script>
@@ -250,6 +258,24 @@ def index():
 @app.route('/api/telemetry')
 def telemetry():
     return jsonify({'status': 'ok', 'logs': latest_logs})
+
+@app.route('/api/add', methods=['POST'])
+def add_message():
+    global latest_logs
+    data = request.get_json()
+    if data and 'text' in data:
+        t_now = time.strftime("%H:%M")
+        new_entry = {
+            "channel": data.get("channel", "@monitor"),
+            "time": t_now,
+            "text": data.get("text")
+        }
+        # Добавляем в начало списка
+        latest_logs.insert(0, new_entry)
+        if len(latest_logs) > 10:
+            latest_logs.pop()
+        return jsonify({'status': 'ok'})
+    return jsonify({'status': 'error'}), 400
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
